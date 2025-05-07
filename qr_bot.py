@@ -11,8 +11,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # Bot Token and Webhook Settings
-TOKEN = os.environ.get("BOT_TOKEN", "7752871738:AAEap1HC4Ns19vgPp3EQhqiJfBh-ocFiIXE")  # Set in Render environment variables
-APP_URL = os.environ.get("APP_URL", "https://qr_bot.onrender.com")  # Your Render URL
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "7752871738:AAEap1HC4Ns19vgPp3EQhqiJfBh-ocFiIXE")  # Set in Render environment variables
+RENDER_URL = os.environ.get("APP_URL", "https://qr_bot.onrender.com")  # Your Render URL
 
 # Flask App
 app = Flask(__name__)
