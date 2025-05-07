@@ -1,4 +1,5 @@
 import logging
+from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import qrcode
@@ -14,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 # Replace 'YOUR_BOT_TOKEN' with your actual bot token
 TOKEN = '7752871738:AAEap1HC4Ns19vgPp3EQhqiJfBh-ocFiIXE'
+WEBHOOK_URL = 'https://qr_bot.onrender.com/webhook'  # Replace with your hosted URL
+
+# Initialize the Flask app
+app = Flask(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a welcome message when the command /start is issued."""
@@ -55,17 +60,39 @@ async def generate_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         caption=f"Here's your QR code for: {text}"
     )
 
-def main() -> None:
-    """Start the bot."""
-    # Create the Application
-    application = Application.builder().token(TOKEN).build()
+# Error handler
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log errors and notify the user."""
+    logger.error(msg="Exception while handling an update:", exc_info=context.error)
+    if update and hasattr(update, 'message'):
+        await update.message.reply_text("⚠️ An unexpected error occurred. Please try again later.")
 
-    # Add handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_qr))
+# Create the Application
+application = Application.builder().token(TOKEN).build()
 
-    # Start the Bot
-    application.run_polling()
+# Add handlers
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_qr))
+
+# Register the error handler
+application.add_error_handler(error_handler)
+
+# Set up webhook route in Flask
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Handle incoming webhook updates from Telegram."""
+    json_str = request.get_data(as_text=True)
+    update = Update.de_json(json_str, application.bot)
+    application.process_update(update)
+    return 'OK'
+
+def set_webhook():
+    """Set the webhook for your bot."""
+    application.bot.set_webhook(url=WEBHOOK_URL)
 
 if __name__ == '__main__':
-    main() 
+    # Set the webhook for the bot
+    set_webhook()
+
+    # Run the Flask web server to handle webhook requests
+    app.run(host='0.0.0.0', port=5000)
