@@ -5,6 +5,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import qrcode
 from PIL import Image
 import io
+import requests
 
 # Enable logging
 logging.basicConfig(
@@ -82,13 +83,16 @@ application.add_error_handler(error_handler)
 def webhook():
     """Handle incoming webhook updates from Telegram."""
     json_str = request.get_data(as_text=True)
+    logger.info(f"Received update: {json_str}")  # Log incoming request
     update = Update.de_json(json_str, application.bot)
     application.process_update(update)
     return 'OK'
 
 def set_webhook():
     """Set the webhook for your bot."""
-    application.bot.set_webhook(url=WEBHOOK_URL)
+    url = 'https://api.telegram.org/bot' + TOKEN + '/setWebhook?url=' + WEBHOOK_URL
+    response = requests.get(url)
+    print(response.json())  # To verify the result of setting the webhook
 
 if __name__ == '__main__':
     # Set the webhook for the bot
