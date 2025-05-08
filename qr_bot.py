@@ -129,12 +129,23 @@ async def main() -> None:
         # Start the bot
         logger.info("Starting bot...")
         
-        # First, try to remove any existing webhook
-        await application.bot.delete_webhook(drop_pending_updates=True)
-        
-        # Then start polling
+        # Initialize the application
         await application.initialize()
+        
+        # Delete any existing webhook
+        logger.info("Deleting any existing webhook...")
+        try:
+            await application.bot.delete_webhook(drop_pending_updates=True)
+            logger.info("Webhook deleted successfully")
+        except Exception as e:
+            logger.error(f"Error deleting webhook: {e}")
+            # Continue anyway as we'll be using polling
+        
+        # Start the bot
         await application.start()
+        
+        # Start polling
+        logger.info("Starting polling...")
         await application.updater.start_polling(
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES,
@@ -143,8 +154,7 @@ async def main() -> None:
             connect_timeout=30,
             pool_timeout=30
         )
-        
-        logger.info("Bot started successfully")
+        logger.info("Polling started successfully")
 
         # Start the web server
         runner = web.AppRunner(app)
