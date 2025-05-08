@@ -80,19 +80,23 @@ async def shutdown(signal, loop):
     """Cleanup tasks tied to the service's shutdown."""
     logger.info(f"Received exit signal {signal.name}...")
     
-    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    [task.cancel() for task in tasks]
-    
-    logger.info(f"Cancelling {len(tasks)} outstanding tasks")
-    await asyncio.gather(*tasks, return_exceptions=True)
-    
     if application:
+        logger.info("Stopping application...")
         await application.stop()
         await application.shutdown()
     
     if runner:
+        logger.info("Cleaning up web server...")
         await runner.cleanup()
     
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if tasks:
+        logger.info(f"Cancelling {len(tasks)} outstanding tasks")
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    
+    logger.info("Shutdown complete")
     loop.stop()
 
 async def main() -> None:
@@ -138,6 +142,11 @@ async def main() -> None:
 
     except Exception as e:
         logger.error(f"Error starting bot: {e}")
+        if application:
+            await application.stop()
+            await application.shutdown()
+        if runner:
+            await runner.cleanup()
         raise
 
 if __name__ == '__main__':
