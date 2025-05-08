@@ -99,13 +99,25 @@ async def shutdown(signal, loop):
     logger.info("Shutdown complete")
     loop.stop()
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle errors in the bot."""
+    logger.error(f"Exception while handling an update: {context.error}")
+
 async def main() -> None:
     """Start the bot and web server."""
     try:
         global application, runner
         
-        # Create the Application
-        application = Application.builder().token(TOKEN).build()
+        # Create the Application with error handler
+        application = (
+            Application.builder()
+            .token(TOKEN)
+            .concurrent_updates(True)
+            .build()
+        )
+
+        # Add error handler
+        application.add_error_handler(error_handler)
 
         # Add handlers
         application.add_handler(CommandHandler("start", start))
@@ -122,7 +134,14 @@ async def main() -> None:
         
         # Start polling with error handling
         try:
-            await application.updater.start_polling(drop_pending_updates=True)
+            await application.updater.start_polling(
+                drop_pending_updates=True,
+                allowed_updates=Update.ALL_TYPES,
+                read_timeout=30,
+                write_timeout=30,
+                connect_timeout=30,
+                pool_timeout=30
+            )
         except Exception as e:
             logger.error(f"Error starting polling: {e}")
             raise
