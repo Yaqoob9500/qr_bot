@@ -102,18 +102,13 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     """Handle errors in the bot."""
     logger.error(f"Exception while handling an update: {context.error}")
 
-async def main() -> None:
-    """Start the bot and web server."""
+def main() -> None:
+    """Start the bot."""
     try:
         global application, runner
         
-        # Create the Application with error handler
-        application = (
-            Application.builder()
-            .token(TOKEN)
-            .concurrent_updates(True)
-            .build()
-        )
+        # Create the Application
+        application = Application.builder().token(TOKEN).build()
 
         # Add error handler
         application.add_error_handler(error_handler)
@@ -122,58 +117,18 @@ async def main() -> None:
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_qr))
 
-        # Create web application
-        app = web.Application()
-        app.router.add_get('/health', health_check)
-
         # Start the bot
         logger.info("Starting bot...")
-        await application.initialize()
-        await application.start()
-        
-        # Start polling
-        logger.info("Starting polling...")
-        await application.updater.start_polling(
-            drop_pending_updates=True,
-            allowed_updates=Update.ALL_TYPES,
-            read_timeout=30,
-            write_timeout=30,
-            connect_timeout=30,
-            pool_timeout=30
-        )
-        logger.info("Polling started successfully")
-
-        # Start the web server
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', PORT)
-        await site.start()
-        logger.info(f"Web server started on port {PORT}")
-
-        # Set up signal handlers
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(
-                sig,
-                lambda s=sig: asyncio.create_task(shutdown(s, loop))
-            )
-
-        # Keep the application running
-        while True:
-            await asyncio.sleep(3600)
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        logger.info("Bot started successfully")
 
     except Exception as e:
         logger.error(f"Error starting bot: {e}")
-        if application:
-            await application.stop()
-            await application.shutdown()
-        if runner:
-            await runner.cleanup()
         raise
 
 if __name__ == '__main__':
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
