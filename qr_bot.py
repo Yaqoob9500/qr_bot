@@ -1,6 +1,7 @@
 import logging
 import os
 import asyncio
+import signal
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import qrcode
@@ -22,6 +23,10 @@ if not TOKEN:
 
 # Get port from environment variable or use default
 PORT = int(os.getenv('PORT', 8080))
+
+# Global variables for cleanup
+application = None
+runner = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a welcome message when the command /start is issued."""
@@ -71,9 +76,30 @@ async def health_check(request):
     """Health check endpoint for Render."""
     return web.Response(text="Bot is running!")
 
+async def shutdown(signal, loop):
+    """Cleanup tasks tied to the service's shutdown."""
+    logger.info(f"Received exit signal {signal.name}...")
+    
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    [task.cancel() for task in tasks]
+    
+    logger.info(f"Cancelling {len(tasks)} outstanding tasks")
+    await asyncio.gather(*tasks, return_exceptions=True)
+    
+    if application:
+        await application.stop()
+        await application.shutdown()
+    
+    if runner:
+        await runner.cleanup()
+    
+    loop.stop()
+
 async def main() -> None:
     """Start the bot and web server."""
     try:
+        global application, runner
+        
         # Create the Application
         application = Application.builder().token(TOKEN).build()
 
@@ -89,7 +115,7 @@ async def main() -> None:
         logger.info("Starting bot...")
         await application.initialize()
         await application.start()
-        await application.updater.start_polling()
+        await application.updater.start_polling(drop_pending_updates=True)
 
         # Start the web server
         runner = web.AppRunner(app)
@@ -97,6 +123,14 @@ async def main() -> None:
         site = web.TCPSite(runner, '0.0.0.0', PORT)
         await site.start()
         logger.info(f"Web server started on port {PORT}")
+
+        # Set up signal handlers
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(
+                sig,
+                lambda s=sig: asyncio.create_task(shutdown(s, loop))
+            )
 
         # Keep the application running
         while True:
@@ -107,4 +141,9 @@ async def main() -> None:
         raise
 
 if __name__ == '__main__':
-    asyncio.run(main()) 
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot stopped due to error: {e}") 
