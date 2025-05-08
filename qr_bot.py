@@ -4,10 +4,12 @@ import asyncio
 import signal
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext._utils.webhookhandler import WebhookHandler
 import qrcode
 from PIL import Image
 import io
 from aiohttp import web
+import httpx
 
 # Enable logging
 logging.basicConfig(
@@ -27,6 +29,7 @@ PORT = int(os.getenv('PORT', 8080))
 # Global variables for cleanup
 application = None
 runner = None
+http_client = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a welcome message when the command /start is issued."""
@@ -89,6 +92,10 @@ async def shutdown(signal, loop):
         logger.info("Cleaning up web server...")
         await runner.cleanup()
     
+    if http_client:
+        logger.info("Closing HTTP client...")
+        await http_client.aclose()
+    
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     if tasks:
         logger.info(f"Cancelling {len(tasks)} outstanding tasks")
@@ -102,10 +109,18 @@ async def shutdown(signal, loop):
 async def main() -> None:
     """Start the bot and web server."""
     try:
-        global application, runner
+        global application, runner, http_client
         
-        # Create the Application
-        application = Application.builder().token(TOKEN).build()
+        # Create HTTP client
+        http_client = httpx.AsyncClient(timeout=30.0)
+        
+        # Create the Application with custom HTTP client
+        application = (
+            Application.builder()
+            .token(TOKEN)
+            .http_client(http_client)
+            .build()
+        )
 
         # Add handlers
         application.add_handler(CommandHandler("start", start))
@@ -147,6 +162,8 @@ async def main() -> None:
             await application.shutdown()
         if runner:
             await runner.cleanup()
+        if http_client:
+            await http_client.aclose()
         raise
 
 if __name__ == '__main__':
