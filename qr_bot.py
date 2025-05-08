@@ -8,6 +8,7 @@ import qrcode
 from PIL import Image
 import io
 from aiohttp import web
+from urllib.parse import urlparse
 
 # Enable logging
 logging.basicConfig(
@@ -22,7 +23,15 @@ if not TOKEN:
     raise ValueError("No TELEGRAM_BOT_TOKEN found in environment variables")
 
 PORT = int(os.getenv('PORT', 8080))
-APP_URL = os.getenv('APP_URL', f'https://{os.getenv("RENDER_EXTERNAL_HOSTNAME", "localhost")}')
+
+# Get the Render URL or use polling
+RENDER_EXTERNAL_URL = os.getenv('RENDER_EXTERNAL_URL')
+if RENDER_EXTERNAL_URL:
+    APP_URL = RENDER_EXTERNAL_URL
+    logger.info(f"Using Render URL: {APP_URL}")
+else:
+    APP_URL = None
+    logger.info("No Render URL found, will use polling mode")
 
 # Global variables for cleanup
 application = None
@@ -75,6 +84,14 @@ async def generate_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def health_check(request):
     """Health check endpoint for Render."""
     return web.Response(text="Bot is running!")
+
+async def webhook_handler(request):
+    """Handle incoming webhook updates."""
+    if request.method == "POST":
+        update = await request.json()
+        await application.update_queue.put(update)
+        return web.Response()
+    return web.Response(status=403)
 
 async def shutdown(signal, loop):
     """Cleanup tasks tied to the service's shutdown."""
@@ -133,13 +150,15 @@ async def main() -> None:
         await application.start()
         
         # Configure webhook or polling based on environment
-        if APP_URL and APP_URL != "localhost":
-            logger.info(f"Setting up webhook on {APP_URL}")
-            await application.bot.set_webhook(url=f"{APP_URL}/webhook")
-            app.router.add_post('/webhook', lambda request: application.update_queue.put(request.json()))
-        else:
-            logger.info("Setting up polling")
+        if APP_URL:
             try:
+                webhook_url = f"{APP_URL}/webhook"
+                logger.info(f"Setting up webhook on {webhook_url}")
+                await application.bot.set_webhook(url=webhook_url)
+                app.router.add_post('/webhook', webhook_handler)
+            except Exception as e:
+                logger.error(f"Failed to set up webhook: {e}")
+                logger.info("Falling back to polling mode")
                 await application.updater.start_polling(
                     drop_pending_updates=True,
                     allowed_updates=Update.ALL_TYPES,
@@ -148,9 +167,16 @@ async def main() -> None:
                     connect_timeout=30,
                     pool_timeout=30
                 )
-            except Exception as e:
-                logger.error(f"Error starting polling: {e}")
-                raise
+        else:
+            logger.info("Using polling mode")
+            await application.updater.start_polling(
+                drop_pending_updates=True,
+                allowed_updates=Update.ALL_TYPES,
+                read_timeout=30,
+                write_timeout=30,
+                connect_timeout=30,
+                pool_timeout=30
+            )
 
         # Start the web server
         runner = web.AppRunner(app)
