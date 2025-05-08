@@ -16,13 +16,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Get bot token from environment variable
+# Get configuration from environment variables
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 if not TOKEN:
     raise ValueError("No TELEGRAM_BOT_TOKEN found in environment variables")
 
-# Get port from environment variable or use default
 PORT = int(os.getenv('PORT', 8080))
+APP_URL = os.getenv('APP_URL', f'https://{os.getenv("RENDER_EXTERNAL_HOSTNAME", "localhost")}')
 
 # Global variables for cleanup
 application = None
@@ -132,19 +132,25 @@ async def main() -> None:
         await application.initialize()
         await application.start()
         
-        # Start polling with error handling
-        try:
-            await application.updater.start_polling(
-                drop_pending_updates=True,
-                allowed_updates=Update.ALL_TYPES,
-                read_timeout=30,
-                write_timeout=30,
-                connect_timeout=30,
-                pool_timeout=30
-            )
-        except Exception as e:
-            logger.error(f"Error starting polling: {e}")
-            raise
+        # Configure webhook or polling based on environment
+        if APP_URL and APP_URL != "localhost":
+            logger.info(f"Setting up webhook on {APP_URL}")
+            await application.bot.set_webhook(url=f"{APP_URL}/webhook")
+            app.router.add_post('/webhook', lambda request: application.update_queue.put(request.json()))
+        else:
+            logger.info("Setting up polling")
+            try:
+                await application.updater.start_polling(
+                    drop_pending_updates=True,
+                    allowed_updates=Update.ALL_TYPES,
+                    read_timeout=30,
+                    write_timeout=30,
+                    connect_timeout=30,
+                    pool_timeout=30
+                )
+            except Exception as e:
+                logger.error(f"Error starting polling: {e}")
+                raise
 
         # Start the web server
         runner = web.AppRunner(app)
