@@ -1,65 +1,83 @@
 import logging
 import os
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import qrcode
+from PIL import Image
 import io
-import asyncio
-from flask import Flask, request
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 # Enable logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-# Bot Token and Webhook Settings
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "7752871738:AAEap1HC4Ns19vgPp3EQhqiJfBh-ocFiIXE")
-APP_URL = os.environ.get("APP_URL", "https://qr_bot.onrender.com")  # Your Render URL
+# Get bot token from environment variable
+TOKEN = os.getenv('7752871738:AAEap1HC4Ns19vgPp3EQhqiJfBh-ocFiIXE')
+if not TOKEN:
+    raise ValueError("No TELEGRAM_BOT_TOKEN found in environment variables")
 
-# Flask App
-app = Flask(__name__)
-
-# Telegram Bot Application
-application = Application.builder().token(BOT_TOKEN).build()
-
-# Telegram Handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a welcome message when the command /start is issued."""
+    welcome_message = (
         "👋 Welcome to the QR Code Generator Bot!\n\n"
-        "Send any text and I'll reply with a QR code image."
+        "Simply send me any text, and I'll generate a QR code for it.\n"
+        "The QR code will be sent back as a PNG image."
     )
+    await update.message.reply_text(welcome_message)
 
-async def generate_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
-    qr.add_data(text)
-    qr.make(fit=True)
-    qr_image = qr.make_image(fill_color="black", back_color="white")
+async def generate_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Generate a QR code from the user's message and send it back."""
+    try:
+        # Get the text from the user's message
+        text = update.message.text
+        
+        # Create QR code instance
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        
+        # Add data to QR code
+        qr.add_data(text)
+        qr.make(fit=True)
+        
+        # Create an image from the QR code
+        qr_image = qr.make_image(fill_color="black", back_color="white")
+        
+        # Convert the image to bytes
+        img_byte_arr = io.BytesIO()
+        qr_image.save(img_byte_arr, format='PNG')
+        img_byte_arr.seek(0)
+        
+        # Send the QR code image
+        await update.message.reply_photo(
+            photo=img_byte_arr,
+            caption=f"Here's your QR code for: {text}"
+        )
+    except Exception as e:
+        logger.error(f"Error generating QR code: {e}")
+        await update.message.reply_text("Sorry, there was an error generating your QR code. Please try again.")
 
-    img_bytes = io.BytesIO()
-    qr_image.save(img_bytes, format='PNG')
-    img_bytes.seek(0)
+def main() -> None:
+    """Start the bot."""
+    try:
+        # Create the Application
+        application = Application.builder().token(TOKEN).build()
 
-    await update.message.reply_photo(photo=img_bytes, caption=f"Here's your QR code for: {text}")
+        # Add handlers
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_qr))
 
-# Register Handlers
-application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_qr))
+        # Start the Bot
+        logger.info("Starting bot...")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+    except Exception as e:
+        logger.error(f"Error starting bot: {e}")
+        raise
 
-# Flask Webhook Route
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
-async def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    await application.process_update(update)
-    return "OK"
-
-# Set webhook using asyncio before server starts
-async def setup_webhook():
-    bot = Bot(token=BOT_TOKEN)
-    await bot.set_webhook(f"{APP_URL}/{BOT_TOKEN}")
-    logger.info("Webhook set to: %s/%s", APP_URL, BOT_TOKEN)
-
-# Start everything
-if __name__ == "__main__":
-    # Setup webhook before running Flask
-    asyncio.run(setup_webhook())
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+if __name__ == '__main__':
+    main() 
