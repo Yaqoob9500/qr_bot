@@ -25,7 +25,6 @@ PORT = int(os.getenv('PORT', 8080))
 
 # Global variables for cleanup
 application = None
-runner = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a welcome message when the command /start is issued."""
@@ -71,44 +70,22 @@ async def generate_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.error(f"Error generating QR code: {e}")
         await update.message.reply_text("Sorry, there was an error generating your QR code. Please try again.")
 
-async def health_check(request):
-    """Health check endpoint for Render."""
-    return web.Response(text="Bot is running!")
-
-async def shutdown(signal, loop):
-    """Cleanup tasks tied to the service's shutdown."""
-    logger.info(f"Received exit signal {signal.name}...")
-    
-    if application:
-        logger.info("Stopping application...")
-        await application.stop()
-        await application.shutdown()
-    
-    if runner:
-        logger.info("Cleaning up web server...")
-        await runner.cleanup()
-    
-    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    if tasks:
-        logger.info(f"Cancelling {len(tasks)} outstanding tasks")
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-    
-    logger.info("Shutdown complete")
-    loop.stop()
-
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors in the bot."""
     logger.error(f"Exception while handling an update: {context.error}")
 
-def main() -> None:
+async def main() -> None:
     """Start the bot."""
     try:
-        global application, runner
+        global application
         
         # Create the Application
-        application = Application.builder().token(TOKEN).build()
+        application = (
+            Application.builder()
+            .token(TOKEN)
+            .concurrent_updates(True)
+            .build()
+        )
 
         # Add error handler
         application.add_error_handler(error_handler)
@@ -119,16 +96,38 @@ def main() -> None:
 
         # Start the bot
         logger.info("Starting bot...")
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        
+        # First, try to remove any existing webhook
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        
+        # Then start polling
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES,
+            read_timeout=30,
+            write_timeout=30,
+            connect_timeout=30,
+            pool_timeout=30
+        )
+        
         logger.info("Bot started successfully")
+        
+        # Keep the application running
+        while True:
+            await asyncio.sleep(3600)
 
     except Exception as e:
         logger.error(f"Error starting bot: {e}")
+        if application:
+            await application.stop()
+            await application.shutdown()
         raise
 
 if __name__ == '__main__':
     try:
-        main()
+        asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
