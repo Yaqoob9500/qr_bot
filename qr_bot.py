@@ -1,10 +1,12 @@
 import logging
 import os
+import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import qrcode
 from PIL import Image
 import io
+from aiohttp import web
 
 # Enable logging
 logging.basicConfig(
@@ -17,6 +19,9 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 if not TOKEN:
     raise ValueError("No TELEGRAM_BOT_TOKEN found in environment variables")
+
+# Get port from environment variable or use default
+PORT = int(os.getenv('PORT', 8080))
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a welcome message when the command /start is issued."""
@@ -62,8 +67,12 @@ async def generate_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.error(f"Error generating QR code: {e}")
         await update.message.reply_text("Sorry, there was an error generating your QR code. Please try again.")
 
-def main() -> None:
-    """Start the bot."""
+async def health_check(request):
+    """Health check endpoint for Render."""
+    return web.Response(text="Bot is running!")
+
+async def main() -> None:
+    """Start the bot and web server."""
     try:
         # Create the Application
         application = Application.builder().token(TOKEN).build()
@@ -72,12 +81,30 @@ def main() -> None:
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_qr))
 
-        # Start the Bot
+        # Create web application
+        app = web.Application()
+        app.router.add_get('/health', health_check)
+
+        # Start the bot
         logger.info("Starting bot...")
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
+
+        # Start the web server
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', PORT)
+        await site.start()
+        logger.info(f"Web server started on port {PORT}")
+
+        # Keep the application running
+        while True:
+            await asyncio.sleep(3600)
+
     except Exception as e:
         logger.error(f"Error starting bot: {e}")
         raise
 
 if __name__ == '__main__':
-    main() 
+    asyncio.run(main()) 
