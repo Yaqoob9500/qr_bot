@@ -25,6 +25,7 @@ PORT = int(os.getenv('PORT', 8080))
 
 # Global variables for cleanup
 application = None
+runner = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a welcome message when the command /start is issued."""
@@ -70,14 +71,41 @@ async def generate_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.error(f"Error generating QR code: {e}")
         await update.message.reply_text("Sorry, there was an error generating your QR code. Please try again.")
 
+async def health_check(request):
+    """Health check endpoint for Render."""
+    return web.Response(text="Bot is running!")
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors in the bot."""
     logger.error(f"Exception while handling an update: {context.error}")
 
+async def shutdown(signal, loop):
+    """Cleanup tasks tied to the service's shutdown."""
+    logger.info(f"Received exit signal {signal.name}...")
+    
+    if application:
+        logger.info("Stopping application...")
+        await application.stop()
+        await application.shutdown()
+    
+    if runner:
+        logger.info("Cleaning up web server...")
+        await runner.cleanup()
+    
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if tasks:
+        logger.info(f"Cancelling {len(tasks)} outstanding tasks")
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    
+    logger.info("Shutdown complete")
+    loop.stop()
+
 async def main() -> None:
-    """Start the bot."""
+    """Start the bot and web server."""
     try:
-        global application
+        global application, runner
         
         # Create the Application
         application = (
@@ -93,6 +121,10 @@ async def main() -> None:
         # Add handlers
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_qr))
+
+        # Create web application
+        app = web.Application()
+        app.router.add_get('/', health_check)
 
         # Start the bot
         logger.info("Starting bot...")
@@ -113,7 +145,22 @@ async def main() -> None:
         )
         
         logger.info("Bot started successfully")
-        
+
+        # Start the web server
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', PORT)
+        await site.start()
+        logger.info(f"Web server started on port {PORT}")
+
+        # Set up signal handlers
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(
+                sig,
+                lambda s=sig: asyncio.create_task(shutdown(s, loop))
+            )
+
         # Keep the application running
         while True:
             await asyncio.sleep(3600)
@@ -123,6 +170,8 @@ async def main() -> None:
         if application:
             await application.stop()
             await application.shutdown()
+        if runner:
+            await runner.cleanup()
         raise
 
 if __name__ == '__main__':
