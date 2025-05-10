@@ -124,15 +124,13 @@ async def main() -> None:
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
         )
         
-        # Create request object with the HTTP client
+        # Create request object with proper configuration
         request = HTTPXRequest(
-            http_version="1.1",
             connection_pool_size=8,
             read_timeout=30.0,
             write_timeout=30.0,
             connect_timeout=30.0,
-            pool_timeout=30.0,
-            http_client=http_client
+            pool_timeout=30.0
         )
         
         # Create the Application with the custom request object
