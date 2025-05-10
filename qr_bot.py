@@ -4,6 +4,7 @@ import asyncio
 import signal
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 import qrcode
 from PIL import Image
 import io
@@ -111,10 +112,20 @@ async def main() -> None:
     try:
         global application, runner
         
-        # Create the Application
+        # Create a custom request object with proper timeout settings
+        request = HTTPXRequest(
+            connection_pool_size=8,
+            read_timeout=30.0,
+            write_timeout=30.0,
+            connect_timeout=30.0,
+            pool_timeout=30.0
+        )
+        
+        # Create the Application with the custom request object
         application = (
             Application.builder()
             .token(TOKEN)
+            .request(request)
             .concurrent_updates(True)
             .build()
         )
@@ -153,10 +164,6 @@ async def main() -> None:
         await application.updater.start_polling(
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES,
-            read_timeout=30,
-            write_timeout=30,
-            connect_timeout=30,
-            pool_timeout=30,
             poll_interval=1.0  # Poll every second
         )
         logger.info("Polling started successfully")
