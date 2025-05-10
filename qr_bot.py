@@ -29,18 +29,21 @@ runner = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a welcome message when the command /start is issued."""
+    logger.info(f"Received /start command from user {update.effective_user.id}")
     welcome_message = (
         "👋 Welcome to the QR Code Generator Bot!\n\n"
         "Simply send me any text, and I'll generate a QR code for it.\n"
         "The QR code will be sent back as a PNG image."
     )
     await update.message.reply_text(welcome_message)
+    logger.info(f"Sent welcome message to user {update.effective_user.id}")
 
 async def generate_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Generate a QR code from the user's message and send it back."""
     try:
         # Get the text from the user's message
         text = update.message.text
+        logger.info(f"Received message from user {update.effective_user.id}: {text}")
         
         # Create QR code instance
         qr = qrcode.QRCode(
@@ -67,6 +70,7 @@ async def generate_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             photo=img_byte_arr,
             caption=f"Here's your QR code for: {text}"
         )
+        logger.info(f"Sent QR code to user {update.effective_user.id}")
     except Exception as e:
         logger.error(f"Error generating QR code: {e}")
         await update.message.reply_text("Sorry, there was an error generating your QR code. Please try again.")
@@ -144,7 +148,7 @@ async def main() -> None:
         # Start the bot
         await application.start()
         
-        # Start polling
+        # Start polling with more frequent updates
         logger.info("Starting polling...")
         await application.updater.start_polling(
             drop_pending_updates=True,
@@ -152,7 +156,8 @@ async def main() -> None:
             read_timeout=30,
             write_timeout=30,
             connect_timeout=30,
-            pool_timeout=30
+            pool_timeout=30,
+            poll_interval=1.0  # Poll every second
         )
         logger.info("Polling started successfully")
 
