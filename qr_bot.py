@@ -4,7 +4,6 @@ import asyncio
 import signal
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.request import HTTPXRequest
 import qrcode
 from PIL import Image
 import io
@@ -29,7 +28,6 @@ application = None
 runner = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a welcome message when the command /start is issued."""
     logger.info(f"Received /start command from user {update.effective_user.id}")
     welcome_message = (
         "👋 Welcome to the QR Code Generator Bot!\n\n"
@@ -40,33 +38,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(f"Sent welcome message to user {update.effective_user.id}")
 
 async def generate_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Generate a QR code from the user's message and send it back."""
     try:
-        # Get the text from the user's message
         text = update.message.text
         logger.info(f"Received message from user {update.effective_user.id}: {text}")
-        
-        # Create QR code instance
+
         qr = qrcode.QRCode(
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_L,
             box_size=10,
             border=4,
         )
-        
-        # Add data to QR code
         qr.add_data(text)
         qr.make(fit=True)
-        
-        # Create an image from the QR code
         qr_image = qr.make_image(fill_color="black", back_color="white")
-        
-        # Convert the image to bytes
+
         img_byte_arr = io.BytesIO()
         qr_image.save(img_byte_arr, format='PNG')
         img_byte_arr.seek(0)
-        
-        # Send the QR code image
+
         await update.message.reply_photo(
             photo=img_byte_arr,
             caption=f"Here's your QR code for: {text}"
@@ -77,114 +66,44 @@ async def generate_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("Sorry, there was an error generating your QR code. Please try again.")
 
 async def health_check(request):
-    """Health check endpoint for Render."""
     return web.Response(text="Bot is running!")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle errors in the bot."""
     logger.error(f"Exception while handling an update: {context.error}")
 
-async def shutdown(signal, loop):
-    """Cleanup tasks tied to the service's shutdown."""
-    logger.info(f"Received exit signal {signal.name}...")
-    
-    if application:
-        logger.info("Stopping application...")
-        await application.stop()
-        await application.shutdown()
-    
-    if runner:
-        logger.info("Cleaning up web server...")
-        await runner.cleanup()
-    
-    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    if tasks:
-        logger.info(f"Cancelling {len(tasks)} outstanding tasks")
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-    
-    logger.info("Shutdown complete")
-    loop.stop()
-
 async def main() -> None:
-    """Start the bot and web server."""
+    global application, runner
+
+    application = (
+        Application.builder()
+        .token(TOKEN)
+        .concurrent_updates(True)
+        .build()
+    )
+
+    application.add_error_handler(error_handler)
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_qr))
+
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    logger.info(f"Web server started on port {PORT}")
+
     try:
-        global application, runner
-        
-        # Create the Application with default request object
-        application = (
-            Application.builder()
-            .token(TOKEN)
-            .concurrent_updates(True)
-            .build()
-        )
-
-        # Add error handler
-        application.add_error_handler(error_handler)
-
-        # Add handlers
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_qr))
-
-        # Create web application
-        app = web.Application()
-        app.router.add_get('/', health_check)
-
-        # Start the bot
-        logger.info("Starting bot...")
-        
-        # Initialize the application
-        await application.initialize()
-        
-        # Delete any existing webhook
-        logger.info("Deleting any existing webhook...")
-        try:
-            await application.bot.delete_webhook(drop_pending_updates=True)
-            logger.info("Webhook deleted successfully")
-        except Exception as e:
-            logger.error(f"Error deleting webhook: {e}")
-            # Continue anyway as we'll be using polling
-        
-        # Start the bot
-        await application.start()
-        
-        # Start polling with more frequent updates
-        logger.info("Starting polling...")
-        await application.updater.start_polling(
-            drop_pending_updates=True,
-            allowed_updates=Update.ALL_TYPES,
-            poll_interval=1.0  # Poll every second
-        )
-        logger.info("Polling started successfully")
-
-        # Start the web server
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', PORT)
-        await site.start()
-        logger.info(f"Web server started on port {PORT}")
-
-        # Set up signal handlers
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(
-                sig,
-                lambda s=sig: asyncio.create_task(shutdown(s, loop))
-            )
-
-        # Keep the application running
-        while True:
-            await asyncio.sleep(3600)
-
+        await application.bot.delete_webhook(drop_pending_updates=True)
     except Exception as e:
-        logger.error(f"Error starting bot: {e}")
-        if application:
-            await application.stop()
-            await application.shutdown()
-        if runner:
-            await runner.cleanup()
-        raise
+        logger.warning(f"Webhook removal failed: {e}")
+
+    logger.info("Bot is starting polling...")
+    await application.run_polling(
+        shutdown_polling=True,
+        close_loop=False,
+        drop_pending_updates=True,
+    )
 
 if __name__ == '__main__':
     try:
@@ -192,4 +111,4 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
-        logger.error(f"Bot stopped due to error: {e}") 
+        logger.error(f"Bot stopped due to error: {e}")
