@@ -1,13 +1,17 @@
 import logging
 import os
-import asyncio
-import signal
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-import qrcode
-from PIL import Image
 import io
-from aiohttp import web
+import qrcode
+import asyncio
+from flask import Flask
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
 # Enable logging
 logging.basicConfig(
@@ -16,99 +20,35 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Get configuration from environment variables
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-if not TOKEN:
-    raise ValueError("No TELEGRAM_BOT_TOKEN found in environment variables")
+# Get the token from environment variable
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("Missing BOT_TOKEN environment variable")
 
-PORT = int(os.getenv('PORT', 8080))
-
-# Global variables for cleanup
-application = None
-runner = None
-
+# Telegram command: /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.info(f"Received /start command from user {update.effective_user.id}")
-    welcome_message = (
-        "👋 Welcome to the QR Code Generator Bot!\n\n"
-        "Simply send me any text, and I'll generate a QR code for it.\n"
-        "The QR code will be sent back as a PNG image."
+    await update.message.reply_text(
+        "👋 Hello! I'm a QR Bot developed by Yaqoob Khan. /Send me any text and I will generate a QR code for it!"
     )
-    await update.message.reply_text(welcome_message)
-    logger.info(f"Sent welcome message to user {update.effective_user.id}")
 
+# Generate QR from any text
 async def generate_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    try:
-        text = update.message.text
-        logger.info(f"Received message from user {update.effective_user.id}: {text}")
+    text = update.message.text
+    qr = qrcode.make(text)
+    img_byte_arr = io.BytesIO()
+    qr.save(img_byte_arr, format='PNG')
+    img_byte_arr.seek(0)
+    await update.message.reply_photo(photo=img_byte_arr, caption=f"QR Code for: {text}")
 
-        qr = qrcode.QRCode(
-            version=1,
-            error_correction=qrcode.constants.ERROR_CORRECT_L,
-            box_size=10,
-            border=4,
-        )
-        qr.add_data(text)
-        qr.make(fit=True)
-        qr_image = qr.make_image(fill_color="black", back_color="white")
+# Run the bot
+async def main():
+    application = Application.builder().token(BOT_TOKEN).build()
 
-        img_byte_arr = io.BytesIO()
-        qr_image.save(img_byte_arr, format='PNG')
-        img_byte_arr.seek(0)
-
-        await update.message.reply_photo(
-            photo=img_byte_arr,
-            caption=f"Here's your QR code for: {text}"
-        )
-        logger.info(f"Sent QR code to user {update.effective_user.id}")
-    except Exception as e:
-        logger.error(f"Error generating QR code: {e}")
-        await update.message.reply_text("Sorry, there was an error generating your QR code. Please try again.")
-
-async def health_check(request):
-    return web.Response(text="Bot is running!")
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error(f"Exception while handling an update: {context.error}")
-
-async def main() -> None:
-    global application, runner
-
-    application = (
-        Application.builder()
-        .token(TOKEN)
-        .concurrent_updates(True)
-        .build()
-    )
-
-    application.add_error_handler(error_handler)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, generate_qr))
 
-    app = web.Application()
-    app.router.add_get('/', health_check)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
-    await site.start()
-    logger.info(f"Web server started on port {PORT}")
-
-    try:
-        await application.bot.delete_webhook(drop_pending_updates=True)
-    except Exception as e:
-        logger.warning(f"Webhook removal failed: {e}")
-
-    logger.info("Bot is starting polling...")
-    await application.run_polling(
-        shutdown_polling=True,
-        close_loop=False,
-        drop_pending_updates=True,
-    )
+    logger.info("Bot started via polling...")
+    await application.run_polling()  # ✅ Correct usage
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Bot stopped due to error: {e}")
+    asyncio.run(main())
