@@ -2,8 +2,7 @@ import logging
 import os
 import asyncio
 import signal
-from telegram import Update  # Change this to telegram.ext.Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, Update  # Correct import
 import qrcode
 from PIL import Image
 import io
