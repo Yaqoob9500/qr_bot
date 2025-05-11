@@ -6,5 +6,6 @@ services:
     startCommand: python qr_bot.py
     envVars:
       - key: TELEGRAM_BOT_TOKEN
-        sync: false
-    plan: free
+        fromSecret: telegram-bot-token
+    ports:
+      - 8080
