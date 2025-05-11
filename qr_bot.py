@@ -98,12 +98,9 @@ async def main() -> None:
     except Exception as e:
         logger.warning(f"Webhook removal failed: {e}")
 
-    logger.info("Bot is starting polling...")
-    await application.run_polling(
-        shutdown_polling=True,
-        close_loop=False,
-        drop_pending_updates=True,
-    )
+        logger.info("Bot is starting polling...")
+    await application.run_polling(drop_pending_updates=True)
+
 
 if __name__ == '__main__':
     try:
