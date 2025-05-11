@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: telegram-qr-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python qr_bot.py
+    envVars:
+      - key: BOT_TOKEN
+        value: 7752871738:AAEap1HC4Ns19vgPp3EQhqiJfBh-ocFiIXE
+    autoDeploy: true
